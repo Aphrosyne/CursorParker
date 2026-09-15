@@ -24,13 +24,6 @@ public static class CursorParker
     private const uint WS_CAPTION = 0x00C00000;
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct LASTINPUTINFO
-    {
-        public uint Size;
-        public uint Time;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
     private struct POINT
     {
         public int X;
@@ -86,13 +79,30 @@ public static class CursorParker
     private static extern int GetSystemMetrics(int index);
 
     [DllImport("user32.dll")]
-    private static extern bool GetLastInputInfo(ref LASTINPUTINFO info);
+    private static extern short GetAsyncKeyState(int virtualKey);
 
-    private static uint GetLastInputTick()
+    private static bool WasTypingKeyPressed()
     {
-        LASTINPUTINFO info = new LASTINPUTINFO();
-        info.Size = (uint)Marshal.SizeOf(typeof(LASTINPUTINFO));
-        return GetLastInputInfo(ref info) ? info.Time : 0;
+        bool shortcutHeld = (GetAsyncKeyState(0x11) & 0x8000) != 0 ||
+                            (GetAsyncKeyState(0x12) & 0x8000) != 0 ||
+                            (GetAsyncKeyState(0x5B) & 0x8000) != 0 ||
+                            (GetAsyncKeyState(0x5C) & 0x8000) != 0;
+        bool pressed = false;
+
+        for (int key = 0x30; key <= 0x5A; key++)
+            pressed |= (GetAsyncKeyState(key) & 0x8001) != 0;
+        for (int key = 0x60; key <= 0x6F; key++)
+            pressed |= (GetAsyncKeyState(key) & 0x8001) != 0;
+        for (int key = 0xBA; key <= 0xC0; key++)
+            pressed |= (GetAsyncKeyState(key) & 0x8001) != 0;
+        for (int key = 0xDB; key <= 0xDF; key++)
+            pressed |= (GetAsyncKeyState(key) & 0x8001) != 0;
+
+        int[] editingKeys = { 0x08, 0x0D, 0x20, 0xE2 };
+        foreach (int key in editingKeys)
+            pressed |= (GetAsyncKeyState(key) & 0x8001) != 0;
+
+        return pressed && !shortcutHeld;
     }
 
     private static bool SamePoint(POINT a, POINT b)
@@ -179,12 +189,12 @@ public static class CursorParker
                 bool parked = false;
                 bool armedByInput = false;
                 bool paused = false;
-                uint lastInputTick = GetLastInputTick();
                 Stopwatch idle = Stopwatch.StartNew();
+                WasTypingKeyPressed();
 
                 try
                 {
-                    while (!stopEvent.WaitOne(100))
+                    while (!stopEvent.WaitOne(50))
                     {
                         if (pauseEvent.WaitOne(0))
                         {
@@ -210,12 +220,11 @@ public static class CursorParker
 
                         POINT current;
                         if (!GetCursorPos(out current)) continue;
-                        uint currentInputTick = GetLastInputTick();
+                        bool typingKeyPressed = WasTypingKeyPressed();
 
                         if (paused)
                         {
                             last = current;
-                            lastInputTick = currentInputTick;
                             idle.Restart();
                             continue;
                         }
@@ -230,7 +239,6 @@ public static class CursorParker
                                 current = saved;
                             }
                             last = current;
-                            lastInputTick = currentInputTick;
                             armedByInput = false;
                             idle.Restart();
                             continue;
@@ -243,7 +251,6 @@ public static class CursorParker
                                 SetCursorPos(saved.X, saved.Y);
                                 parked = false;
                                 last = saved;
-                                lastInputTick = currentInputTick;
                                 armedByInput = false;
                                 idle.Restart();
                             }
@@ -253,17 +260,13 @@ public static class CursorParker
                         if (!SamePoint(current, last))
                         {
                             last = current;
-                            lastInputTick = currentInputTick;
                             armedByInput = false;
                             idle.Restart();
                             continue;
                         }
 
-                        if (currentInputTick != 0 && currentInputTick != lastInputTick)
-                        {
+                        if (typingKeyPressed)
                             armedByInput = true;
-                            lastInputTick = currentInputTick;
-                        }
 
                         if (armedByInput && idle.Elapsed.TotalSeconds >= timeoutSeconds)
                         {
