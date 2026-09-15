@@ -1,26 +1,58 @@
 # CursorParker
 
-A lightweight Windows cursor parking script.
+CursorParker 是一个轻量、免安装的 Windows 鼠标停放脚本，用于防止静止的鼠标指针遮挡输入内容。
 
-## Behavior
+## 工作方式
 
-- Arms only after system input is detected while the mouse is stationary.
-- Parks the pointer in the bottom-right corner after 1 second of mouse inactivity.
-- Restores the pointer to its saved position on the next mouse movement.
-- Automatically pauses for borderless full-screen windows and captured cursors.
-- Does not replace cursor images, install keyboard hooks, or use UI Automation.
+- 仅当鼠标保持静止且检测到新的系统输入时进入待停放状态。
+- 鼠标静止 1 秒后，记录当前位置并将指针停放到当前显示器右下角。
+- 再次移动鼠标时，将指针恢复到停放前的位置。
+- 当前台运行无标题栏全屏窗口，或鼠标被程序捕获时，自动暂停停放功能。
+- 不替换系统光标、不安装键盘钩子、不使用 UI Automation，因此不会破坏动态光标。
 
-## Usage
+## 系统要求
 
-- `start_cursor_parker.cmd`: start the background process.
-- `stop_cursor_parker.cmd`: stop it and restore a parked pointer.
-- `pause_cursor_parker.cmd`: temporarily pause parking.
-- `resume_cursor_parker.cmd`: resume parking.
-- `enable_startup.cmd`: enable launch at user sign-in.
-- `disable_startup.cmd`: disable launch at user sign-in.
-- `toggle_startup.cmd`: toggle launch at user sign-in.
+- Windows 10 或 Windows 11
+- 系统自带的 Windows PowerShell 5.1
+- 不需要管理员权限或第三方运行环境
 
-Startup is implemented as `CursorParker.lnk` in the current user's Startup
-folder. It does not require administrator access or a system-wide registry key.
+## 使用方法
 
-The PowerShell source is ASCII-only and requires no third-party runtime.
+- `start_cursor_parker.cmd`：启动后台进程。
+- `stop_cursor_parker.cmd`：停止进程；如果指针正停放在角落，会恢复到原位置。
+- `pause_cursor_parker.cmd`：临时暂停停放功能。
+- `resume_cursor_parker.cmd`：恢复停放功能。
+
+重复运行启动脚本不会产生多个实例。
+
+## 开机启动
+
+- `enable_startup.cmd`：开启当前用户的开机启动。
+- `disable_startup.cmd`：关闭当前用户的开机启动。
+- `toggle_startup.cmd`：在开启与关闭之间切换。
+
+开机启动通过当前用户“启动”目录内的 `CursorParker.lnk` 实现，不修改注册表，也不需要管理员权限。关闭开机启动时，该快捷方式会被删除。程序和源码始终保留在原目录。
+
+## 调整停放时间
+
+编辑 `start_cursor_parker.cmd`，修改下面参数后的数字：
+
+```text
+-TimeoutSeconds 1
+```
+
+也可以直接运行：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\cursor_parker.ps1 -TimeoutSeconds 2
+```
+
+## 已知限制
+
+- 首次移动鼠标时会先恢复停放前的位置，因此可能看到一次轻微的位置跳动。
+- 原地点击或滚动滚轮有可能被识别为新的系统输入。
+- 全屏保护无法覆盖所有窗口化游戏；运行窗口化游戏前可使用暂停脚本。
+
+## 许可证
+
+本项目采用 [MIT License](LICENSE)。
