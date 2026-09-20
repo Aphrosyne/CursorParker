@@ -32,13 +32,22 @@ Game1=C:\Games\Example\game.exe
 
 ## 使用
 
-双击 `光标停放.cmd` 会打开中文命令行选择器，可选择启动、暂停、恢复、停止或切换开机启动；选择“退出”后关闭窗口。选择器只使用控制台，不打开额外的图形界面。
+项目保留两个入口：
 
-外层 CMD 文件只含 ASCII 字符。中文菜单脚本 `launcher.ps1` 使用 UTF-16LE BOM 编码，适配系统自带的 Windows PowerShell 5.1，不使用 UTF-8 中文批处理文本。
+- `光标停放器设置.cmd`：打开中文命令行菜单，显示运行状态，并提供运行开关以及“启用开机启动”“禁用开机启动”两条明确指令。
+- `光标停放器开关.cmd`：静默切换停放器进程的启动/停止，不显示提示或等待窗口。CMD 从资源管理器双击时可能短暂闪过控制台。
 
-也保留了独立的 `start_cursor_parker.cmd`、`stop_cursor_parker.cmd`、`pause_cursor_parker.cmd` 和 `resume_cursor_parker.cmd`，可直接双击使用。
+不再提供暂停/恢复功能：运行开关会直接停止或重新启动后台进程；进程停止后不再驻留，重新启动时会重新读取 INI 配置。两个 CMD 入口文件都只含 ASCII 字符。中文控制台脚本 `launcher.ps1` 使用 UTF-16LE BOM 编码，适配系统自带的 Windows PowerShell 5.1，不依赖 CMD 代码页。
 
 开机启动通过当前用户“启动”目录里的 `CursorParker.lnk` 实现，不修改注册表，也不需要管理员权限。关闭开机启动会删除这个快捷方式；程序和配置仍保留在本目录。
+
+快捷方式的完整路径通常是：
+
+```text
+%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\CursorParker.lnk
+```
+
+`%APPDATA%` 指当前 Windows 用户的漫游应用数据目录；如果“启动”目录被系统重定向，实际位置以 Windows 返回的用户 Startup 目录为准。
 
 ## 系统要求
 
@@ -49,6 +58,7 @@ Game1=C:\Games\Example\game.exe
 ## 已知限制
 
 - 首次移动鼠标时会先恢复停放前的位置，因此可能看到一次轻微的位置跳动。
+- 停放期间按住鼠标键移动时，会等所有鼠标键松开后再恢复原位置，避免按住时瞬移造成桌面大范围框选；点击和实际拖动仍发生在停放点。
 - 脚本无法确认应用中的实际输入框焦点；未列入排除列表的程序中，单独按字母、数字或标点也可能触发停放。
 - 全屏保护无法覆盖所有窗口化游戏；可将游戏 EXE 完整路径加入排除列表。
 

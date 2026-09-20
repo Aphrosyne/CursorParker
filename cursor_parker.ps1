@@ -1,10 +1,7 @@
 param(
     [ValidateRange(0.05, 3600)]
     [double]$TimeoutSeconds = 1,
-    [switch]$CheckOnly,
-    [switch]$Stop,
-    [switch]$Pause,
-    [switch]$Resume
+    [switch]$CheckOnly
 )
 
 $idleSeconds = $TimeoutSeconds
@@ -180,6 +177,15 @@ public static class CursorParker
         return a.X == b.X && a.Y == b.Y;
     }
 
+    private static bool IsMouseButtonDown()
+    {
+        return (GetAsyncKeyState(0x01) & 0x8000) != 0 ||
+               (GetAsyncKeyState(0x02) & 0x8000) != 0 ||
+               (GetAsyncKeyState(0x04) & 0x8000) != 0 ||
+               (GetAsyncKeyState(0x05) & 0x8000) != 0 ||
+               (GetAsyncKeyState(0x06) & 0x8000) != 0;
+    }
+
     private static bool IsFullscreenForeground(IntPtr window)
     {
         if (window == IntPtr.Zero) return false;
@@ -266,15 +272,7 @@ public static class CursorParker
             bool eventCreated;
             using (EventWaitHandle stopEvent = new EventWaitHandle(false,
                 EventResetMode.ManualReset, @"Local\CursorParkerStop", out eventCreated))
-            using (EventWaitHandle pauseEvent = new EventWaitHandle(false,
-                EventResetMode.ManualReset, @"Local\CursorParkerPause", out eventCreated))
-            using (EventWaitHandle resumeEvent = new EventWaitHandle(false,
-                EventResetMode.ManualReset, @"Local\CursorParkerResume", out eventCreated))
             {
-                stopEvent.Reset();
-                pauseEvent.Reset();
-                resumeEvent.Reset();
-
                 POINT last;
                 if (!GetCursorPos(out last)) return;
 
@@ -282,7 +280,6 @@ public static class CursorParker
                 POINT park = last;
                 bool parked = false;
                 bool armedByInput = false;
-                bool paused = false;
                 uint checkedProcessId = UInt32.MaxValue;
                 bool excludedForeground = false;
                 Stopwatch idle = Stopwatch.StartNew();
@@ -292,38 +289,9 @@ public static class CursorParker
                 {
                     while (!stopEvent.WaitOne(50))
                     {
-                        if (pauseEvent.WaitOne(0))
-                        {
-                            pauseEvent.Reset();
-                            paused = true;
-                            armedByInput = false;
-                            if (parked)
-                            {
-                                SetCursorPos(saved.X, saved.Y);
-                                parked = false;
-                                last = saved;
-                            }
-                        }
-
-                        if (resumeEvent.WaitOne(0))
-                        {
-                            resumeEvent.Reset();
-                            paused = false;
-                            armedByInput = false;
-                            GetCursorPos(out last);
-                            idle.Restart();
-                        }
-
                         POINT current;
                         if (!GetCursorPos(out current)) continue;
                         bool typingKeyPressed = WasTypingKeyPressed();
-
-                        if (paused)
-                        {
-                            last = current;
-                            idle.Restart();
-                            continue;
-                        }
 
                         IntPtr foregroundWindow = GetForegroundWindow();
                         uint foregroundProcessId;
@@ -339,7 +307,7 @@ public static class CursorParker
                                              IsCursorCaptured();
                         if (protectedMode)
                         {
-                            if (parked)
+                            if (parked && !IsMouseButtonDown())
                             {
                                 SetCursorPos(saved.X, saved.Y);
                                 parked = false;
@@ -353,7 +321,7 @@ public static class CursorParker
 
                         if (parked)
                         {
-                            if (!SamePoint(current, park))
+                            if (!SamePoint(current, park) && !IsMouseButtonDown())
                             {
                                 SetCursorPos(saved.X, saved.Y);
                                 parked = false;
@@ -391,6 +359,8 @@ public static class CursorParker
                 }
                 finally
                 {
+                    while (parked && IsMouseButtonDown())
+                        Thread.Sleep(50);
                     if (parked) SetCursorPos(saved.X, saved.Y);
                 }
             }
@@ -403,39 +373,6 @@ Add-Type -TypeDefinition $source -Language CSharp
 
 if ($CheckOnly) {
     Write-Output "OK"
-    exit 0
-}
-
-if ($Stop) {
-    try {
-        $stopEvent = [Threading.EventWaitHandle]::OpenExisting("Local\CursorParkerStop")
-        $stopEvent.Set() | Out-Null
-        $stopEvent.Dispose()
-    }
-    catch {
-    }
-    exit 0
-}
-
-if ($Pause) {
-    try {
-        $pauseEvent = [Threading.EventWaitHandle]::OpenExisting("Local\CursorParkerPause")
-        $pauseEvent.Set() | Out-Null
-        $pauseEvent.Dispose()
-    }
-    catch {
-    }
-    exit 0
-}
-
-if ($Resume) {
-    try {
-        $resumeEvent = [Threading.EventWaitHandle]::OpenExisting("Local\CursorParkerResume")
-        $resumeEvent.Set() | Out-Null
-        $resumeEvent.Dispose()
-    }
-    catch {
-    }
     exit 0
 }
 
