@@ -12,7 +12,7 @@ function Enable-CursorParkerStartup {
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
     $shortcut.TargetPath = $powerShellPath
-    $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`" -TimeoutSeconds 1"
+    $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`""
     $shortcut.WorkingDirectory = $PSScriptRoot
     $shortcut.WindowStyle = 7
     $shortcut.Description = "Start CursorParker"

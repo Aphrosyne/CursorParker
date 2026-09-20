@@ -1,11 +1,78 @@
 param(
-    [ValidateRange(1, 3600)]
-    [int]$TimeoutSeconds = 1,
+    [ValidateRange(0.05, 3600)]
+    [double]$TimeoutSeconds = 1,
     [switch]$CheckOnly,
     [switch]$Stop,
     [switch]$Pause,
     [switch]$Resume
 )
+
+$idleSeconds = $TimeoutSeconds
+$excludedGamePaths = @()
+$configPath = Join-Path $PSScriptRoot 'CursorParker.ini'
+
+if (Test-Path -LiteralPath $configPath -PathType Leaf) {
+    $configBytes = [System.IO.File]::ReadAllBytes($configPath)
+    if ($configBytes.Length -ge 3 -and $configBytes[0] -eq 0xEF -and $configBytes[1] -eq 0xBB -and $configBytes[2] -eq 0xBF) {
+        $configText = [System.Text.Encoding]::UTF8.GetString($configBytes, 3, $configBytes.Length - 3)
+    }
+    elseif ($configBytes.Length -ge 2 -and $configBytes[0] -eq 0xFF -and $configBytes[1] -eq 0xFE) {
+        $configText = [System.Text.Encoding]::Unicode.GetString($configBytes, 2, $configBytes.Length - 2)
+    }
+    elseif ($configBytes.Length -ge 2 -and $configBytes[0] -eq 0xFE -and $configBytes[1] -eq 0xFF) {
+        $configText = [System.Text.Encoding]::BigEndianUnicode.GetString($configBytes, 2, $configBytes.Length - 2)
+    }
+    else {
+        try {
+            $strictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
+            $configText = $strictUtf8.GetString($configBytes)
+        }
+        catch {
+            $configText = [System.Text.Encoding]::Default.GetString($configBytes)
+        }
+    }
+
+    $section = ''
+    foreach ($line in ($configText -split "`n")) {
+        $entry = $line.Trim()
+        if (-not $entry -or $entry.StartsWith(';') -or $entry.StartsWith('#')) { continue }
+        if ($entry -match '^\[(.+)\]$') {
+            $section = $Matches[1].Trim()
+            continue
+        }
+
+        $separator = $entry.IndexOf('=')
+        if ($separator -le 0) { continue }
+        $key = $entry.Substring(0, $separator).Trim()
+        $value = $entry.Substring($separator + 1).Trim()
+
+        if ($section -ieq 'General' -and $key -ieq 'IdleSeconds') {
+            $parsedSeconds = 0.0
+            $numberStyles = [Globalization.NumberStyles]::AllowDecimalPoint -bor [Globalization.NumberStyles]::AllowLeadingSign
+            $validNumber = [double]::TryParse(
+                $value,
+                $numberStyles,
+                [Globalization.CultureInfo]::InvariantCulture,
+                [ref]$parsedSeconds
+            )
+            if ($validNumber -and $parsedSeconds -ge 0.05 -and $parsedSeconds -le 3600) {
+                $idleSeconds = $parsedSeconds
+            }
+        }
+        elseif ($section -ieq 'ExcludedGames' -and $key -match '^Game\d+$') {
+            if ($value.Length -ge 2 -and $value[0] -eq '"' -and $value[$value.Length - 1] -eq '"') {
+                $value = $value.Substring(1, $value.Length - 2)
+            }
+            try {
+                if ([System.IO.Path]::IsPathRooted($value) -and $value.EndsWith('.exe', [StringComparison]::OrdinalIgnoreCase)) {
+                    $excludedGamePaths += [System.IO.Path]::GetFullPath($value)
+                }
+            }
+            catch {
+            }
+        }
+    }
+}
 
 $source = @'
 using System;
@@ -56,6 +123,9 @@ public static class CursorParker
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
 
     [DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr window, out RECT rect);
@@ -110,9 +180,8 @@ public static class CursorParker
         return a.X == b.X && a.Y == b.Y;
     }
 
-    private static bool IsFullscreenForeground()
+    private static bool IsFullscreenForeground(IntPtr window)
     {
-        IntPtr window = GetForegroundWindow();
         if (window == IntPtr.Zero) return false;
 
         RECT windowRect;
@@ -158,11 +227,36 @@ public static class CursorParker
 
         POINT park = new POINT();
         park.X = info.Monitor.Right - 2;
-        park.Y = info.Monitor.Bottom - 2;
+        int height = info.Monitor.Bottom - info.Monitor.Top;
+        int upwardOffset = Math.Max(64, (int)Math.Round(height * 0.05));
+        park.Y = Math.Max(info.Monitor.Top + 2, info.Monitor.Bottom - upwardOffset);
         return park;
     }
 
-    public static void Run(int timeoutSeconds)
+    private static bool IsExcludedProcess(uint processId, string[] excludedPaths)
+    {
+        if (processId == 0 || excludedPaths == null || excludedPaths.Length == 0) return false;
+
+        try
+        {
+            using (Process process = Process.GetProcessById((int)processId))
+            {
+                string executablePath = process.MainModule.FileName;
+                foreach (string excludedPath in excludedPaths)
+                {
+                    if (String.Equals(executablePath, excludedPath, StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
+    }
+
+    public static void Run(double timeoutSeconds, string[] excludedPaths)
     {
         bool mutexCreated;
         using (Mutex mutex = new Mutex(true, @"Local\CursorParker", out mutexCreated))
@@ -189,6 +283,8 @@ public static class CursorParker
                 bool parked = false;
                 bool armedByInput = false;
                 bool paused = false;
+                uint checkedProcessId = UInt32.MaxValue;
+                bool excludedForeground = false;
                 Stopwatch idle = Stopwatch.StartNew();
                 WasTypingKeyPressed();
 
@@ -229,7 +325,18 @@ public static class CursorParker
                             continue;
                         }
 
-                        bool protectedMode = IsFullscreenForeground() || IsCursorCaptured();
+                        IntPtr foregroundWindow = GetForegroundWindow();
+                        uint foregroundProcessId;
+                        GetWindowThreadProcessId(foregroundWindow, out foregroundProcessId);
+                        if (foregroundProcessId != checkedProcessId)
+                        {
+                            checkedProcessId = foregroundProcessId;
+                            excludedForeground = IsExcludedProcess(foregroundProcessId, excludedPaths);
+                        }
+
+                        bool protectedMode = excludedForeground ||
+                                             IsFullscreenForeground(foregroundWindow) ||
+                                             IsCursorCaptured();
                         if (protectedMode)
                         {
                             if (parked)
@@ -332,4 +439,4 @@ if ($Resume) {
     exit 0
 }
 
-[CursorParker]::Run($TimeoutSeconds)
+[CursorParker]::Run($idleSeconds, [string[]]$excludedGamePaths)

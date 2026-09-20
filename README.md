@@ -1,15 +1,54 @@
 # CursorParker
 
-CursorParker 是一个轻量、免安装的 Windows 鼠标停放脚本，用于防止静止的鼠标指针遮挡输入内容。
+CursorParker 是一个轻量、免安装的 Windows 鼠标停放工具，用于减少静止指针遮挡输入内容的情况。
 
 ## 工作方式
 
-- 仅当鼠标保持静止且检测到文字输入键时进入待停放状态。
-- 忽略鼠标点击、滚轮以及带 Ctrl、Alt 或 Win 的快捷键。
-- 鼠标静止 1 秒后，记录当前位置并将指针停放到当前显示器右下角。
+- 鼠标保持静止且检测到文字输入键后，开始等待配置的时间。
+- 等待结束后记录鼠标原位置，并将指针停到当前显示器最右侧、靠近右下方的位置。
 - 再次移动鼠标时，将指针恢复到停放前的位置。
-- 当前台运行无标题栏全屏窗口，或鼠标被程序捕获时，自动暂停停放功能。
-- 不替换系统光标、不安装键盘钩子、不使用 UI Automation，因此不会破坏动态光标。
+- 当前台窗口是无标题栏全屏窗口、鼠标被程序捕获，或当前程序路径列在排除列表中时，自动暂停停放。
+- 忽略鼠标点击、滚轮以及带 Ctrl、Alt 或 Win 的快捷键。
+- 不替换系统光标，不安装键盘钩子，也不使用 UI Automation。
+
+## 配置
+
+编辑程序目录里的 `CursorParker.ini`：
+
+```ini
+[General]
+IdleSeconds=1
+
+[ExcludedGames]
+Game1=C:\Games\Example\game.exe
+; Game2=D:\Games\AnotherGame\game.exe
+```
+
+- `IdleSeconds` 是检测到文字输入后等待的秒数，可以使用小数，例如 `1.5`。
+- 在 `[ExcludedGames]` 下，每个 `GameN` 填一条游戏 EXE 的完整绝对路径。游戏窗口处于前台时会暂停停放；路径必须和实际运行的 EXE 完全对应，不支持通配符。
+- 不确定游戏 EXE 路径时，可在任务管理器“详细信息”页右键游戏进程，选择“打开文件所在的位置”。
+- 配置只在下次启动时读取。保存配置后重新启动 CursorParker 即可生效。
+- INI 支持 UTF-8、UTF-8 BOM、UTF-16 BOM，以及当前 Windows ANSI 编码，便于填写含中文目录的路径。
+
+## 使用
+
+双击 `光标停放.vbs` 会在后台静默启动，不打开命令行窗口或菜单。需要执行其他操作时，可传入操作参数：
+
+入口脚本内容只使用 ASCII 字符，中文仅出现在文件名和 README 中，不依赖命令提示符代码页。
+
+```text
+wscript.exe "光标停放.vbs" start
+wscript.exe "光标停放.vbs" stop
+wscript.exe "光标停放.vbs" pause
+wscript.exe "光标停放.vbs" resume
+wscript.exe "光标停放.vbs" startup-on
+wscript.exe "光标停放.vbs" startup-off
+wscript.exe "光标停放.vbs" startup-toggle
+```
+
+也保留了独立的 `start_cursor_parker.cmd`、`stop_cursor_parker.cmd`、`pause_cursor_parker.cmd` 和 `resume_cursor_parker.cmd`，可直接双击使用。
+
+开机启动通过当前用户“启动”目录里的 `CursorParker.lnk` 实现，不修改注册表，也不需要管理员权限。关闭开机启动会删除这个快捷方式；程序和配置仍保留在本目录。
 
 ## 系统要求
 
@@ -17,42 +56,11 @@ CursorParker 是一个轻量、免安装的 Windows 鼠标停放脚本，用于�
 - 系统自带的 Windows PowerShell 5.1
 - 不需要管理员权限或第三方运行环境
 
-## 使用方法
-
-- `start_cursor_parker.cmd`：启动后台进程。
-- `stop_cursor_parker.cmd`：停止进程；如果指针正停放在角落，会恢复到原位置。
-- `pause_cursor_parker.cmd`：临时暂停停放功能。
-- `resume_cursor_parker.cmd`：恢复停放功能。
-
-重复运行启动脚本不会产生多个实例。
-
-## 开机启动
-
-- `enable_startup.cmd`：开启当前用户的开机启动。
-- `disable_startup.cmd`：关闭当前用户的开机启动。
-- `toggle_startup.cmd`：在开启与关闭之间切换。
-
-开机启动通过当前用户“启动”目录内的 `CursorParker.lnk` 实现，不修改注册表，也不需要管理员权限。关闭开机启动时，该快捷方式会被删除。程序和源码始终保留在原目录。
-
-## 调整停放时间
-
-编辑 `start_cursor_parker.cmd`，修改下面参数后的数字：
-
-```text
--TimeoutSeconds 1
-```
-
-也可以直接运行：
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\cursor_parker.ps1 -TimeoutSeconds 2
-```
-
 ## 已知限制
 
 - 首次移动鼠标时会先恢复停放前的位置，因此可能看到一次轻微的位置跳动。
-- 无法确认应用中的实际输入框焦点；在非输入框中单独按字母、数字或标点也可能进入待停放状态。
-- 全屏保护无法覆盖所有窗口化游戏；运行窗口化游戏前可使用暂停脚本。
+- 脚本无法确认应用中的实际输入框焦点；未列入排除列表的程序中，单独按字母、数字或标点也可能触发停放。
+- 全屏保护无法覆盖所有窗口化游戏；可将游戏 EXE 完整路径加入排除列表。
 
 ## 许可证
 
