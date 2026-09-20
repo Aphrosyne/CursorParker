@@ -229,7 +229,8 @@ public static class CursorParker
         IntPtr monitor = MonitorFromPoint(current, MONITOR_DEFAULTTONEAREST);
         MONITORINFO info = new MONITORINFO();
         info.Size = Marshal.SizeOf(typeof(MONITORINFO));
-        GetMonitorInfo(monitor, ref info);
+        if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref info))
+            return current;
 
         POINT park = new POINT();
         park.X = info.Monitor.Right - 2;
@@ -309,9 +310,11 @@ public static class CursorParker
                         {
                             if (parked && !IsMouseButtonDown())
                             {
-                                SetCursorPos(saved.X, saved.Y);
-                                parked = false;
-                                current = saved;
+                                if (SetCursorPos(saved.X, saved.Y))
+                                {
+                                    parked = false;
+                                    current = saved;
+                                }
                             }
                             last = current;
                             armedByInput = false;
@@ -323,11 +326,13 @@ public static class CursorParker
                         {
                             if (!SamePoint(current, park) && !IsMouseButtonDown())
                             {
-                                SetCursorPos(saved.X, saved.Y);
-                                parked = false;
-                                last = saved;
-                                armedByInput = false;
-                                idle.Restart();
+                                if (SetCursorPos(saved.X, saved.Y))
+                                {
+                                    parked = false;
+                                    last = saved;
+                                    armedByInput = false;
+                                    idle.Restart();
+                                }
                             }
                             continue;
                         }
@@ -347,11 +352,21 @@ public static class CursorParker
                         {
                             saved = current;
                             park = GetParkPoint(current);
-                            if (!SamePoint(saved, park))
+                            if (SamePoint(saved, park))
                             {
-                                SetCursorPos(park.X, park.Y);
-                                parked = true;
-                                last = park;
+                                armedByInput = false;
+                            }
+                            else
+                            {
+                                if (SetCursorPos(park.X, park.Y))
+                                {
+                                    parked = true;
+                                    last = park;
+                                }
+                                else
+                                {
+                                    armedByInput = false;
+                                }
                             }
                             idle.Restart();
                         }
@@ -359,9 +374,15 @@ public static class CursorParker
                 }
                 finally
                 {
-                    while (parked && IsMouseButtonDown())
-                        Thread.Sleep(50);
-                    if (parked) SetCursorPos(saved.X, saved.Y);
+                    while (parked)
+                    {
+                        if (IsMouseButtonDown() || !SetCursorPos(saved.X, saved.Y))
+                        {
+                            Thread.Sleep(50);
+                            continue;
+                        }
+                        parked = false;
+                    }
                 }
             }
         }
