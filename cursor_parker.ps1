@@ -177,6 +177,37 @@ public static class CursorParker
         return a.X == b.X && a.Y == b.Y;
     }
 
+    private static bool IsPointWithin(POINT point, RECT rect)
+    {
+        return point.X >= rect.Left && point.X < rect.Right &&
+               point.Y >= rect.Top && point.Y < rect.Bottom;
+    }
+
+    private static bool TryRestoreCursor(POINT target, out POINT actual)
+    {
+        actual = target;
+        RECT clip;
+        bool hasClip = GetClipCursor(out clip);
+        bool cursorCaptured = hasClip && IsCursorCaptured(clip);
+        if (cursorCaptured && !IsPointWithin(target, clip))
+        {
+            GetCursorPos(out actual);
+            return false;
+        }
+
+        if (!SetCursorPos(target.X, target.Y))
+        {
+            GetCursorPos(out actual);
+            return false;
+        }
+        if (!GetCursorPos(out actual)) return false;
+
+        // SetCursorPos can succeed after the system clamps a point outside ClipCursor.
+        // Keep waiting while a custom clip is active; if the desktop itself changed,
+        // accept the nearest position the system permits so shutdown can finish.
+        return SamePoint(actual, target) || (hasClip && !cursorCaptured);
+    }
+
     private static bool IsMouseButtonDown()
     {
         return (GetAsyncKeyState(0x01) & 0x8000) != 0 ||
@@ -212,6 +243,11 @@ public static class CursorParker
         RECT clip;
         if (!GetClipCursor(out clip)) return false;
 
+        return IsCursorCaptured(clip);
+    }
+
+    private static bool IsCursorCaptured(RECT clip)
+    {
         int left = GetSystemMetrics(SM_XVIRTUALSCREEN);
         int top = GetSystemMetrics(SM_YVIRTUALSCREEN);
         int right = left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
@@ -242,13 +278,15 @@ public static class CursorParker
 
     private static bool IsExcludedProcess(uint processId, string[] excludedPaths)
     {
-        if (processId == 0 || excludedPaths == null || excludedPaths.Length == 0) return false;
+        if (excludedPaths == null || excludedPaths.Length == 0) return false;
+        if (processId == 0) return true;
 
         try
         {
             using (Process process = Process.GetProcessById((int)processId))
             {
                 string executablePath = process.MainModule.FileName;
+                if (String.IsNullOrEmpty(executablePath)) return true;
                 foreach (string excludedPath in excludedPaths)
                 {
                     if (String.Equals(executablePath, excludedPath, StringComparison.OrdinalIgnoreCase))
@@ -258,6 +296,8 @@ public static class CursorParker
         }
         catch
         {
+            // A path lookup failure must not silently disable configured game protection.
+            return true;
         }
 
         return false;
@@ -270,9 +310,8 @@ public static class CursorParker
         {
             if (!mutexCreated) return;
 
-            bool eventCreated;
             using (EventWaitHandle stopEvent = new EventWaitHandle(false,
-                EventResetMode.ManualReset, @"Local\CursorParkerStop", out eventCreated))
+                EventResetMode.ManualReset, @"Local\CursorParkerStop"))
             {
                 POINT last;
                 if (!GetCursorPos(out last)) return;
@@ -280,6 +319,7 @@ public static class CursorParker
                 POINT saved = last;
                 POINT park = last;
                 bool parked = false;
+                bool restoreAfterProtection = false;
                 bool armedByInput = false;
                 uint checkedProcessId = UInt32.MaxValue;
                 bool excludedForeground = false;
@@ -308,12 +348,18 @@ public static class CursorParker
                                              IsCursorCaptured();
                         if (protectedMode)
                         {
-                            if (parked && !IsMouseButtonDown())
+                            if (parked)
                             {
-                                if (SetCursorPos(saved.X, saved.Y))
+                                restoreAfterProtection = true;
+                                if (!IsMouseButtonDown())
                                 {
-                                    parked = false;
-                                    current = saved;
+                                    POINT restored;
+                                    if (TryRestoreCursor(saved, out restored))
+                                    {
+                                        parked = false;
+                                        restoreAfterProtection = false;
+                                        current = restored;
+                                    }
                                 }
                             }
                             last = current;
@@ -324,12 +370,14 @@ public static class CursorParker
 
                         if (parked)
                         {
-                            if (!SamePoint(current, park) && !IsMouseButtonDown())
+                            if ((restoreAfterProtection || !SamePoint(current, park)) && !IsMouseButtonDown())
                             {
-                                if (SetCursorPos(saved.X, saved.Y))
+                                POINT restored;
+                                if (TryRestoreCursor(saved, out restored))
                                 {
                                     parked = false;
-                                    last = saved;
+                                    restoreAfterProtection = false;
+                                    last = restored;
                                     armedByInput = false;
                                     idle.Restart();
                                 }
@@ -361,6 +409,7 @@ public static class CursorParker
                                 if (SetCursorPos(park.X, park.Y))
                                 {
                                     parked = true;
+                                    restoreAfterProtection = false;
                                     last = park;
                                 }
                                 else
@@ -376,7 +425,8 @@ public static class CursorParker
                 {
                     while (parked)
                     {
-                        if (IsMouseButtonDown() || !SetCursorPos(saved.X, saved.Y))
+                        POINT restored;
+                        if (IsMouseButtonDown() || !TryRestoreCursor(saved, out restored))
                         {
                             Thread.Sleep(50);
                             continue;
