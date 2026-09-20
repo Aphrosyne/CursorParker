@@ -32,19 +32,9 @@ Game1=C:\Games\Example\game.exe
 
 ## 使用
 
-双击 `光标停放.vbs` 会在后台静默启动，不打开命令行窗口或菜单。需要执行其他操作时，可传入操作参数：
+双击 `光标停放.cmd` 会打开中文命令行选择器，可选择启动、暂停、恢复、停止或切换开机启动；选择“退出”后关闭窗口。选择器只使用控制台，不打开额外的图形界面。
 
-入口脚本内容只使用 ASCII 字符，中文仅出现在文件名和 README 中，不依赖命令提示符代码页。
-
-```text
-wscript.exe "光标停放.vbs" start
-wscript.exe "光标停放.vbs" stop
-wscript.exe "光标停放.vbs" pause
-wscript.exe "光标停放.vbs" resume
-wscript.exe "光标停放.vbs" startup-on
-wscript.exe "光标停放.vbs" startup-off
-wscript.exe "光标停放.vbs" startup-toggle
-```
+外层 CMD 文件只含 ASCII 字符。中文菜单脚本 `launcher.ps1` 使用 UTF-16LE BOM 编码，适配系统自带的 Windows PowerShell 5.1，不使用 UTF-8 中文批处理文本。
 
 也保留了独立的 `start_cursor_parker.cmd`、`stop_cursor_parker.cmd`、`pause_cursor_parker.cmd` 和 `resume_cursor_parker.cmd`，可直接双击使用。
 
